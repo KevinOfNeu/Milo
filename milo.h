@@ -13,6 +13,7 @@ typedef enum {
 
 
 typedef struct {
+    double n;
     milo_type type;
 } milo_value;
 
@@ -20,11 +21,14 @@ enum {
     MILO_PARSE_OK = 0,
     MILO_PARSE_EXPECT_VALUE,
     MILO_PARSE_INVALID_VALUE,
-    MILO_PARSE_ROOT_NOT_SINGULAR
+    MILO_PARSE_ROOT_NOT_SINGULAR,
+    MILO_PARSE_NUMBER_TOO_BIG
 };
 
 int milo_parse(milo_value *value, const char *json);
 
 milo_type milo_get_type(const milo_value *v);
+
+double milo_get_number(const milo_value *v);
 
 #endif /*MILOJSON_H_*/

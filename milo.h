@@ -51,6 +51,7 @@ enum {
 #define milo_init(v) do { (v)->type = MILO_NULL; } while(0)
 
 int milo_parse(milo_value *value, const char *json);
+char* milo_stringify(const milo_value* v, size_t* length);
 
 void milo_free(milo_value* v);
 

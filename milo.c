@@ -180,6 +180,52 @@ static int milo_parse_string(milo_context* c, milo_value* v) {
     }
 }
 
+static int milo_parse_value(milo_context *c, milo_value *v); /* forward declaration */
+
+static int milo_parse_array(milo_context* c, milo_value* v) {
+    size_t i, size = 0;
+    int ret;
+    EXPECT(c, '[');
+    milo_parse_whitespace(c);
+    if (*c->json == ']') {
+        c->json++;
+        v->type = MILO_ARRAY;
+        v->u.a.size = 0;
+        v->u.a.e = NULL;
+        return MILO_PARSE_OK;
+    }
+    for(;;) {
+        milo_value e;
+        milo_init(&e);
+        if ((ret = milo_parse_value(c, &e)) != MILO_PARSE_OK)
+            break;
+        memcpy(milo_context_push(c, sizeof(milo_value)), &e, sizeof(milo_value));
+        size++;
+        milo_parse_whitespace(c);
+        if (*c->json == ',') {
+            c->json++;
+            milo_parse_whitespace(c);
+        }
+        else if (*c->json == ']') {
+            c->json++;
+            v->type = MILO_ARRAY;
+            v->u.a.size = size;
+            size *= sizeof(milo_value);
+            memcpy(v->u.a.e = (milo_value*)malloc(size), milo_context_pop(c, size), size);
+            return MILO_PARSE_OK;
+        }
+        else {
+            ret = MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+            break;
+        }
+    }
+    /* Pop and free values on the stack */
+    for (i = 0; i < size; i++)
+        milo_free((milo_value*)milo_context_pop(c, sizeof(milo_value)));
+    return ret;
+}
+
+
 static int milo_parse_value(milo_context *c, milo_value *v) {
     switch (*c->json) {
         case 'f':
@@ -192,6 +238,7 @@ static int milo_parse_value(milo_context *c, milo_value *v) {
             return MILO_PARSE_EXPECT_VALUE;
         case '"':
             return milo_parse_string(c, v);
+        case '[':  return milo_parse_array(c, v);
         default:
             return milo_parse_number(c, v);
     }
@@ -219,9 +266,19 @@ int milo_parse(milo_value *v, const char *json) {
 }
 
 void milo_free(milo_value* v) {
+    size_t  i;
     assert( v!= NULL);
-    if (v ->type == MILO_STRING)
-        free(v->u.s.s);
+    switch (v->type) {
+        case MILO_STRING:
+            free(v->u.s.s);
+            break;
+        case MILO_ARRAY:
+            for (i = 0; i < v->u.a.size; i++)
+                milo_free(&v->u.a.e[i]);
+            free(v->u.a.e);
+            break;
+        default: break;
+    }
     v->type = MILO_NULL;
 }
 
@@ -271,3 +328,13 @@ void milo_set_string(milo_value* v, const char* s, size_t len) {
     v->type = MILO_STRING;
 }
 
+size_t milo_get_array_size(const milo_value* v) {
+    assert(v!= NULL && v->type == MILO_ARRAY);
+    return v->u.a.size;
+}
+
+milo_value* milo_get_array_element(const milo_value* v, size_t index) {
+    assert(v!=NULL && v->type == MILO_ARRAY);
+    assert(index < v->u.a.size);
+    return &v->u.a.e[index];
+}

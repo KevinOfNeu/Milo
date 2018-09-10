@@ -13,14 +13,16 @@ typedef enum {
     MILO_OBJECT
 } milo_type;
 
+typedef struct milo_value milo_value;
 
-typedef struct {
+struct milo_value {
     union {
+        struct { milo_value* e; size_t size; }a; /* array */
         struct { char* s; size_t len; }s;  /* string: null-terminated string, string length */
         double n;                          /* number */
     }u;
     milo_type type;
-} milo_value;
+};
 
 enum {
     MILO_PARSE_OK = 0,
@@ -32,7 +34,8 @@ enum {
     MILO_PARSE_INVALID_STRING_ESCAPE,
     MILO_PARSE_INVALID_STRING_CHAR,
     MILO_PARSE_INVALID_UNICODE_HEX,
-    MILO_PARSE_INVALID_UNICODE_SURROGATE
+    MILO_PARSE_INVALID_UNICODE_SURROGATE,
+    MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET
 };
 
 #define milo_init(v) do { (v)->type = MILO_NULL; } while(0)
@@ -54,5 +57,8 @@ void milo_set_number(milo_value* v, double n);
 const char* milo_get_string(const milo_value* v);
 size_t milo_get_string_length(const milo_value* v);
 void milo_set_string(milo_value* v, const char* s, size_t len);
+
+size_t milo_get_array_size(const milo_value* v);
+milo_value* milo_get_array_element(const milo_value* v, size_t index);
 
 #endif /*MILOJSON_H_*/

@@ -1,3 +1,7 @@
+#ifdef _WINDOWS
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +30,12 @@ static int test_pass = 0;
     EXPECT_EQ_BASE(sizeof(expect) - 1 == alength && memcmp(expect, actual, alength) == 0, expect, actual, "%s")
 #define EXPECT_TRUE(actual) EXPECT_EQ_BASE((actual) != 0, "true", "false", "%s")
 #define EXPECT_FALSE(actual) EXPECT_EQ_BASE((actual) == 0, "false", "true", "%s")
+
+#if defined(_MSC_VER)
+#define EXPECT_EQ_SIZE_T(expect, actual) EXPECT_EQ_BASE((expect) == (actual), (size_t)expect, (size_t)actual, "%Iu")
+#else
+#define EXPECT_EQ_SIZE_T(expect, actual) EXPECT_EQ_BASE((expect) == (actual), (size_t)expect, (size_t)actual, "%zu")
+#endif
 
 static void test_parse_null() {
     milo_value v;
@@ -120,6 +130,46 @@ static void test_parse_string() {
     TEST_STRING("\xF0\x9D\x84\x9E", "\"\\ud834\\udd1e\"");  /* G clef sign U+1D11E */
 }
 
+static void test_parse_array() {
+    size_t i, j;
+    milo_value v;
+
+    milo_init(&v);
+    EXPECT_EQ_INT(MILO_PARSE_OK, milo_parse(&v, "[ ]"));
+    EXPECT_EQ_INT(MILO_ARRAY, milo_get_type(&v));
+    EXPECT_EQ_SIZE_T(0, milo_get_array_size(&v));
+    milo_free(&v);
+
+    milo_init(&v);
+    EXPECT_EQ_INT(MILO_PARSE_OK, milo_parse(&v, "[ null , false , true , 123 , \"abc\" ]"));
+    EXPECT_EQ_INT(MILO_ARRAY, milo_get_type(&v));
+    EXPECT_EQ_SIZE_T(5, milo_get_array_size(&v));
+    EXPECT_EQ_INT(MILO_NULL,   milo_get_type(milo_get_array_element(&v, 0)));
+    EXPECT_EQ_INT(MILO_FALSE,  milo_get_type(milo_get_array_element(&v, 1)));
+    EXPECT_EQ_INT(MILO_TRUE,   milo_get_type(milo_get_array_element(&v, 2)));
+    EXPECT_EQ_INT(MILO_NUMBER, milo_get_type(milo_get_array_element(&v, 3)));
+    EXPECT_EQ_INT(MILO_STRING, milo_get_type(milo_get_array_element(&v, 4)));
+    EXPECT_EQ_DOUBLE(123.0, milo_get_number(milo_get_array_element(&v, 3)));
+    EXPECT_EQ_STRING("abc", milo_get_string(milo_get_array_element(&v, 4)), milo_get_string_length(milo_get_array_element(&v, 4)));
+    milo_free(&v);
+
+    milo_init(&v);
+    EXPECT_EQ_INT(MILO_PARSE_OK, milo_parse(&v, "[ [ ] , [ 0 ] , [ 0 , 1 ] , [ 0 , 1 , 2 ] ]"));
+    EXPECT_EQ_INT(MILO_ARRAY, milo_get_type(&v));
+    EXPECT_EQ_SIZE_T(4, milo_get_array_size(&v));
+    for (i = 0; i < 4; i++) {
+        milo_value* a = milo_get_array_element(&v, i);
+        EXPECT_EQ_INT(MILO_ARRAY, milo_get_type(a));
+        EXPECT_EQ_SIZE_T(i, milo_get_array_size(a));
+        for (j = 0; j < i; j++) {
+            milo_value* e = milo_get_array_element(a, j);
+            EXPECT_EQ_INT(MILO_NUMBER, milo_get_type(e));
+            EXPECT_EQ_DOUBLE((double)j, milo_get_number(e));
+        }
+    }
+    milo_free(&v);
+}
+
 #define TEST_ERROR(error, json)\
     do {\
         milo_value v;\
@@ -204,12 +254,22 @@ static void test_parse_invalid_unicode_surrogate() {
     TEST_ERROR(MILO_PARSE_INVALID_UNICODE_SURROGATE, "\"\\uD800\\uE000\"");
 }
 
+static void test_parse_miss_comma_or_square_bracket() {
+#if 0
+    TEST_ERROR(MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET, "[1");
+    TEST_ERROR(MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET, "[1}");
+    TEST_ERROR(MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET, "[1 2");
+    TEST_ERROR(MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET, "[[]");
+#endif
+}
+
 static void test_parse() {
     test_parse_null();
     test_parse_true();
     test_parse_false();
     test_parse_number();
     test_parse_string();
+    test_parse_array();
     test_parse_expect_value();
     test_parse_invalid_value();
     test_parse_root_not_singular();
@@ -219,6 +279,7 @@ static void test_parse() {
     test_parse_invalid_string_char();
     test_parse_invalid_unicode_hex();
     test_parse_invalid_unicode_surrogate();
+    test_parse_miss_comma_or_square_bracket();
 }
 
 static void test_access_null() {

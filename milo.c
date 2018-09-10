@@ -125,18 +125,18 @@ static void milo_encode_utf8(milo_context* c, unsigned u) {
 
 #define STRING_ERROR(ret) do { c->top = head; return ret; } while(0)
 
-static int milo_parse_string(milo_context* c, milo_value* v) {
-    size_t  head = c->top, len;
+static int milo_parse_string_raw(milo_context* c, char** str, size_t* len) {
+    size_t head = c->top;
     unsigned u, u2;
     const char* p;
     EXPECT(c, '\"');
-    p = c-> json;
+    p = c->json;
     for (;;) {
         char ch = *p++;
         switch (ch) {
             case '\"':
-                len = c->top - head;
-                milo_set_string(v, (const char*) milo_context_pop(c, len), len);
+                *len = c->top - head;
+                *str = milo_context_pop(c, *len);
                 c->json = p;
                 return MILO_PARSE_OK;
             case '\\':
@@ -172,12 +172,20 @@ static int milo_parse_string(milo_context* c, milo_value* v) {
             case '\0':
                 STRING_ERROR(MILO_PARSE_MISS_QUOTATION_MARK);
             default:
-                if ((unsigned char)ch < 0x20) {
+                if ((unsigned char)ch < 0x20)
                     STRING_ERROR(MILO_PARSE_INVALID_STRING_CHAR);
-                }
                 PUTC(c, ch);
         }
     }
+}
+
+static int milo_parse_string(milo_context* c, milo_value* v) {
+    int ret;
+    char* s;
+    size_t len;
+    if ((ret = milo_parse_string_raw(c, &s, &len)) == MILO_PARSE_OK)
+        milo_set_string(v, s, len);
+    return ret;
 }
 
 static int milo_parse_value(milo_context *c, milo_value *v); /* forward declaration */
@@ -225,6 +233,76 @@ static int milo_parse_array(milo_context* c, milo_value* v) {
     return ret;
 }
 
+static int milo_parse_object(milo_context* c, milo_value* v) {
+    size_t i, size;
+    milo_member m;
+    int ret;
+    EXPECT(c, '{');
+    milo_parse_whitespace(c);
+    if (*c->json == '}') {
+        c->json++;
+        v->type = MILO_OBJECT;
+        v->u.o.m = 0;
+        v->u.o.size = 0;
+        return MILO_PARSE_OK;
+    }
+    m.k = NULL;
+    size = 0;
+    for (;;) {
+        char* str;
+        milo_init(&m.v);
+        /* parse key */
+        if (*c->json != '"') {
+            ret = MILO_PARSE_MISS_KEY;
+            break;
+        }
+        if ((ret = milo_parse_string_raw(c, &str, &m.klen)) != MILO_PARSE_OK)
+            break;
+        memcpy(m.k = (char*)malloc(m.klen + 1), str, m.klen);
+        m.k[m.klen] = '\0';
+        /* parse ws colon ws */
+        milo_parse_whitespace(c);
+        if (*c->json != ':') {
+            ret = MILO_PARSE_MISS_COLON;
+            break;
+        }
+        c->json++;
+        milo_parse_whitespace(c);
+        /* parse value */
+        if ((ret = milo_parse_value(c, &m.v)) != MILO_PARSE_OK)
+            break;
+        memcpy(milo_context_push(c, sizeof(milo_member)), &m, sizeof(milo_member));
+        size++;
+        m.k = NULL; /* ownership is transferred to member on stack */
+        /* parse ws [comma | right-curly-brace] ws */
+        milo_parse_whitespace(c);
+        if (*c->json == ',') {
+            c->json++;
+            milo_parse_whitespace(c);
+        }
+        else if (*c->json == '}') {
+            size_t s = sizeof(milo_member) * size;
+            c->json++;
+            v->type = MILO_OBJECT;
+            v->u.o.size = size;
+            memcpy(v->u.o.m = (milo_member*)malloc(s), milo_context_pop(c, s), s);
+            return MILO_PARSE_OK;
+        }
+        else {
+            ret = MILO_PARSE_MISS_COMMA_OR_CURLY_BRACKET;
+            break;
+        }
+    }
+    /* Pop and free members on the stack */
+    free(m.k);
+    for (i = 0; i < size; i++) {
+        milo_member* m = (milo_member*)milo_context_pop(c, sizeof(milo_member));
+        free(m->k);
+        milo_free(&m->v);
+    }
+    v->type = MILO_NULL;
+    return ret;
+}
 
 static int milo_parse_value(milo_context *c, milo_value *v) {
     switch (*c->json) {
@@ -239,6 +317,7 @@ static int milo_parse_value(milo_context *c, milo_value *v) {
         case '"':
             return milo_parse_string(c, v);
         case '[':  return milo_parse_array(c, v);
+        case '{':  return milo_parse_object(c, v);
         default:
             return milo_parse_number(c, v);
     }
@@ -276,6 +355,13 @@ void milo_free(milo_value* v) {
             for (i = 0; i < v->u.a.size; i++)
                 milo_free(&v->u.a.e[i]);
             free(v->u.a.e);
+            break;
+        case MILO_OBJECT:
+            for (i = 0; i < v->u.o.size; i++) {
+                free(v->u.o.m[i].k);
+                milo_free(&v->u.o.m[i].v);
+            }
+            free(v->u.o.m);
             break;
         default: break;
     }
@@ -337,4 +423,27 @@ milo_value* milo_get_array_element(const milo_value* v, size_t index) {
     assert(v!=NULL && v->type == MILO_ARRAY);
     assert(index < v->u.a.size);
     return &v->u.a.e[index];
+}
+
+size_t milo_get_object_size(const milo_value* v) {
+    assert(v != NULL && v->type == MILO_OBJECT);
+    return v->u.o.size;
+}
+
+const char* milo_get_object_key(const milo_value* v, size_t index) {
+    assert(v != NULL && v->type == MILO_OBJECT);
+    assert(index < v->u.o.size);
+    return v->u.o.m[index].k;
+}
+
+size_t milo_get_object_key_length(const milo_value* v, size_t index) {
+    assert(v != NULL && v->type == MILO_OBJECT);
+    assert(index < v->u.o.size);
+    return v->u.o.m[index].klen;
+}
+
+milo_value* milo_get_object_value(const milo_value* v, size_t index) {
+    assert(v != NULL && v->type == MILO_OBJECT);
+    assert(index < v->u.o.size);
+    return &v->u.o.m[index].v;
 }

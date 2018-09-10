@@ -1,5 +1,5 @@
-#ifndef  MILOJSON_H_
-#define  MILOJSON_H_
+#ifndef  MILOJSON_H__
+#define  MILOJSON_H__
 
 #include <stddef.h> /* size_t */
 
@@ -14,14 +14,21 @@ typedef enum {
 } milo_type;
 
 typedef struct milo_value milo_value;
+typedef struct milo_member milo_member;
 
 struct milo_value {
     union {
-        struct { milo_value* e; size_t size; }a; /* array */
+        struct { milo_member* m; size_t  size; }o; /* object: members, member count */
+        struct { milo_value* e; size_t size; }a; /* array:  elements, element count */
         struct { char* s; size_t len; }s;  /* string: null-terminated string, string length */
         double n;                          /* number */
     }u;
     milo_type type;
+};
+
+struct milo_member {
+    char* k; size_t klen; /* member key string, key string length */
+    milo_value v; /* member value */
 };
 
 enum {
@@ -35,7 +42,10 @@ enum {
     MILO_PARSE_INVALID_STRING_CHAR,
     MILO_PARSE_INVALID_UNICODE_HEX,
     MILO_PARSE_INVALID_UNICODE_SURROGATE,
-    MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET
+    MILO_PARSE_MISS_COMMA_OR_SQUARE_BRACKET,
+    MILO_PARSE_MISS_KEY,
+    MILO_PARSE_MISS_COLON,
+    MILO_PARSE_MISS_COMMA_OR_CURLY_BRACKET
 };
 
 #define milo_init(v) do { (v)->type = MILO_NULL; } while(0)
@@ -61,4 +71,9 @@ void milo_set_string(milo_value* v, const char* s, size_t len);
 size_t milo_get_array_size(const milo_value* v);
 milo_value* milo_get_array_element(const milo_value* v, size_t index);
 
-#endif /*MILOJSON_H_*/
+size_t milo_get_object_size(const milo_value* v);
+const char* milo_get_object_key(const milo_value* v, size_t index);
+size_t milo_get_object_key_length(const milo_value* v, size_t index);
+milo_value* milo_get_object_value(const milo_value* v, size_t index);
+
+#endif /* MILOJSON_H__ */
